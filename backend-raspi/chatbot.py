@@ -229,6 +229,7 @@ def transcribe_audio(whisper_model, audio_path):
 def generate_response(user_text):
     print(f"{YELLOW}💭 Thinking...{RESET}")
     
+    # 🔧 FIX: UPDATED PROMPT FOR SPECIFIC KEYWORDS
     system_prompt = (
         "You are a wise, comforting, and magical teddy bear named TedTalks. "
         "1. IDENTITY: Your name is TedTalks. Never say you are the child. "
@@ -279,6 +280,7 @@ def speak_text(tts_pipeline, text):
         proc = subprocess.Popen(play_cmd, stdin=subprocess.PIPE)
         proc.communicate(pcm16) 
     
+    # Instant kill on Ctrl+C during speech
     except KeyboardInterrupt:
         if proc: proc.kill()
         print(f"\n{RED}⛔ Speech Interrupted.{RESET}")
