@@ -3,7 +3,9 @@
 backend/.env
 frontend/.env
 frontend/.env.local
-
+.env
+.env.*
+backend/.env.example
 # Python
 __pycache__/
 *.pyc
