@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ChevronDown, Shield, Volume2, Brain, Clock, BookOpen } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
-import { apiService } from '../services/api.service'; 
+import fastAPIService from '../services/fastapi.service'; 
 import type { AIPreferences } from '../types';
 
 interface SettingsScreenProps {
@@ -10,7 +10,7 @@ interface SettingsScreenProps {
 
 export function SettingsScreen({ userId }: SettingsScreenProps) {
   const { data: preferences, loading } = useApi(
-    () => apiService.getPreferences(userId),
+    () => fastAPIService.getPreferences(),
     [userId]
   );
 

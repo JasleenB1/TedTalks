@@ -1,26 +1,21 @@
 import { Clock, Smile, AlertCircle, TrendingUp, MessageCircle } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer } from 'recharts';
 import { useApi } from '../hooks/useApi';
-import { apiService } from '../services/api.service'; 
+import fastAPIService from '../services/fastapi.service'; 
 
 export function DashboardScreen() {
   // Fetch data from backend using custom hook
   const { data: summary, loading: summaryLoading } = useApi(
-    () => apiService.getDashboardSummary(), // Use this when backend is ready
-    []
-  );
-
-  const { data: moodData, loading: moodLoading } = useApi(
-    () => apiService.getMoodTrends(7), // Use this when backend is ready
+    () => fastAPIService.getDashboardSummary(),
     []
   );
 
   const { data: alerts, loading: alertsLoading } = useApi(
-    () => apiService.getAlerts(0, 10), // Use this when backend is ready
+    () => fastAPIService.getAlerts(),
     []
   );
 
-  if (summaryLoading || moodLoading || alertsLoading) {
+  if (summaryLoading || alertsLoading) {
     return (
       <div className="p-4 flex items-center justify-center min-h-[400px] bg-sand">
         <div className="text-ink/60">Loading dashboard...</div>
@@ -28,8 +23,18 @@ export function DashboardScreen() {
     );
   }
 
+  // Mock mood data for trends (7 days)
+  const moodData = [
+    { day: 'Mon', mood: 3 },
+    { day: 'Tue', mood: 3.5 },
+    { day: 'Wed', mood: 4 },
+    { day: 'Thu', mood: 3.8 },
+    { day: 'Fri', mood: 4.2 },
+    { day: 'Sat', mood: 4.5 },
+    { day: 'Sun', mood: 4 },
+  ];
+
   // Weekly average mood (0-5 scale assumed)
-  
   const weeklyAvg =
     moodData && moodData.length > 0
       ? (moodData.reduce((sum: number, item: any) => sum + item.mood, 0) / moodData.length).toFixed(1)
@@ -48,19 +53,19 @@ export function DashboardScreen() {
         <div className="grid grid-cols-3 gap-3">
           <div className="text-center p-3 bg-periwinkle/15 rounded-xl border border-cloud">
             <MessageCircle className="w-6 h-6 text-periwinkle mx-auto mb-1" />
-            <div className="text-2xl text-ink">{summary?.conversationCount || 0}</div>
+            <div className="text-2xl text-ink font-semibold">{summary?.conversationCount || 0}</div>
             <div className="text-xs text-ink/70">Conversations</div>
           </div>
 
           <div className="text-center p-3 bg-mist/25 rounded-xl border border-cloud">
             <Clock className="w-6 h-6 text-ink/70 mx-auto mb-1" />
-            <div className="text-2xl text-ink">{summary?.activeTimeMinutes || 0}m</div>
+            <div className="text-2xl text-ink font-semibold">{summary?.activeTimeMinutes || 0}m</div>
             <div className="text-xs text-ink/70">Active Time</div>
           </div>
 
           <div className="text-center p-3 bg-blush rounded-xl border border-sand/60">
             <Smile className="w-6 h-6 text-cocoa mx-auto mb-1" />
-            <div className="text-2xl text-ink">{summary?.currentMood || '😊'}</div>
+            <div className="text-2xl text-ink font-semibold">{summary?.currentMood || '😊'}</div>
             <div className="text-xs text-ink/70">Mood</div>
           </div>
         </div>
@@ -128,23 +133,23 @@ export function DashboardScreen() {
           {alerts && alerts.length > 0 ? (
             alerts.map((alert: any) => (
               <div
-                key={alert.id}
+                key={alert._id || alert.id}
                 className="flex gap-3 p-3 bg-cream rounded-xl border border-cloud"
               >
                 <div
                   className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${
-                    alert.type === 'INFO'
+                    alert.severity === 'low'
                       ? 'bg-periwinkle'
-                      : alert.type === 'SUCCESS'
-                      ? 'bg-mist'
-                      : alert.type === 'WARNING'
+                      : alert.severity === 'medium'
                       ? 'bg-honey'
                       : 'bg-rose'
                   }`}
                 />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-ink">{alert.message}</p>
-                  <p className="text-xs text-ink/60 mt-0.5">{alert.timeAgo}</p>
+                  <p className="text-xs text-ink/60 mt-0.5">
+                    {new Date(alert.timestamp).toLocaleString()}
+                  </p>
                 </div>
               </div>
             ))

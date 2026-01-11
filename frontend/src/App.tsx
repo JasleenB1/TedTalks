@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { LoginScreen } from './components/LoginScreen';
 import { DashboardScreen } from './components/DashboardScreen';
 import { ConversationTimelineScreen } from './components/ConversationTimelineScreen';
-import { SettingsScreen } from './components/SettingsScreen';
-import { Home, MessageSquare, Settings, LogOut } from 'lucide-react';
-import { apiService } from './services/api.service';
+import { ParentAdvisorScreen } from './components/ParentAdvisorScreen';
+import { Home, MessageSquare, Lightbulb, LogOut } from 'lucide-react';
+import fastAPIService from './services/fastapi.service';
 
-type Screen = 'login' | 'dashboard' | 'timeline' | 'settings';
+type Screen = 'login' | 'dashboard' | 'timeline' | 'advisor';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('login');
@@ -14,14 +14,14 @@ export default function App() {
   const [userId, setUserId] = useState<string>('');
 
   const handleLogin = (token: string, uid: string) => {
-    apiService.setToken(token);
+    fastAPIService.setToken(token);
     setUserId(uid);
     setIsLoggedIn(true);
     setCurrentScreen('dashboard');
   };
 
   const handleLogout = async () => {
-    await apiService.logout();
+    await fastAPIService.logout();
     setIsLoggedIn(false);
     setUserId('');
     setCurrentScreen('login');
@@ -48,7 +48,7 @@ export default function App() {
       <main className="flex-1 overflow-y-auto pb-20">
         {currentScreen === 'dashboard' && <DashboardScreen />}
         {currentScreen === 'timeline' && <ConversationTimelineScreen />}
-        {currentScreen === 'settings' && <SettingsScreen userId={userId} />}
+        {currentScreen === 'advisor' && <ParentAdvisorScreen userId={userId} />}
       </main>
 
       {/* Bottom Navigation */}
@@ -77,15 +77,15 @@ export default function App() {
             <span className="text-xs">Timeline</span>
           </button>
           <button
-            onClick={() => setCurrentScreen('settings')}
+            onClick={() => setCurrentScreen('advisor')}
             className={`flex flex-col items-center gap-1 px-4 py-2 rounded-lg transition-colors ${
-              currentScreen === 'settings'
+              currentScreen === 'advisor'
                 ? 'text-blue-600 bg-blue-50'
                 : 'text-gray-600 hover:bg-gray-50'
             }`}
           >
-            <Settings className="w-5 h-5" />
-            <span className="text-xs">Settings</span>
+            <Lightbulb className="w-5 h-5" />
+            <span className="text-xs">Advisor</span>
           </button>
         </div>
       </nav>

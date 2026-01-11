@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Lock, Mail } from 'lucide-react';
-import { apiService } from '../services/api.service'; 
+import fastAPIService from '../services/fastapi.service'; 
+import { mockService } from '../services/mock.service';
 
 interface LoginScreenProps {
   onLogin: (token: string, userId: string) => void;
@@ -18,14 +19,20 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     setError(null);
 
     try {
-      const response = await apiService.login({ email, password });
+      console.log("LoginScreen: Attempting login with", { email, password });
+      const response = await fastAPIService.login({ username: email, password });
+
+      console.log("LoginScreen: Got response", response);
 
       if (response.success && response.data) {
-        onLogin(response.data.token, response.data.userId);
+        console.log("LoginScreen: Login successful, calling onLogin");
+        onLogin(response.data.token || '', response.data.userId || '');
       } else {
+        console.log("LoginScreen: Response not successful", response);
         setError(response.error || 'Login failed');
       }
     } catch (err) {
+      console.error("LoginScreen: Caught error", err);
       setError('Network error. Please try again.');
     } finally {
       setLoading(false);
