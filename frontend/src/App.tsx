@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { LoginScreen } from './components/LoginScreen';
 import { DashboardScreen } from './components/DashboardScreen';
 import { ConversationTimelineScreen } from './components/ConversationTimelineScreen';
-import { ParentAdvisorScreen } from './components/ParentAdvisorScreen';
-import { Home, MessageSquare, Lightbulb, LogOut } from 'lucide-react';
-import fastAPIService from './services/fastapi.service';
+import { SettingsScreen } from './components/SettingsScreen';
+import { Home, MessageSquare, Brain, LogOut } from 'lucide-react';
+import { apiService } from './services/api.service';
 
 type Screen = 'login' | 'dashboard' | 'timeline' | 'advisor';
 
@@ -14,14 +14,14 @@ export default function App() {
   const [userId, setUserId] = useState<string>('');
 
   const handleLogin = (token: string, uid: string) => {
-    fastAPIService.setToken(token);
+    apiService.setToken(token);
     setUserId(uid);
     setIsLoggedIn(true);
     setCurrentScreen('dashboard');
   };
 
   const handleLogout = async () => {
-    await fastAPIService.logout();
+    await apiService.logout();
     setIsLoggedIn(false);
     setUserId('');
     setCurrentScreen('login');
@@ -34,8 +34,8 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto">
       {/* Header */}
-      <header className="bg-offwhite border-b border-gray-200 px-4 py-4 flex items-center justify-between">
-        <h1 className="font-semibold text-gray-900">TedTalks AI Assistant</h1>
+      <header className="bg-white border-b border-gray-200 px-4 py-4 flex items-center justify-between">
+        <h1 className="font-semibold text-gray-900">TedTalks</h1>
         <button
           onClick={handleLogout}
           className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
@@ -48,11 +48,11 @@ export default function App() {
       <main className="flex-1 overflow-y-auto pb-20">
         {currentScreen === 'dashboard' && <DashboardScreen />}
         {currentScreen === 'timeline' && <ConversationTimelineScreen />}
-        {currentScreen === 'advisor' && <ParentAdvisorScreen userId={userId} />}
+        {currentScreen === 'advisor' && <SettingsScreen userId={userId} />}
       </main>
 
       {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-offwhite border-t border-gray-200 px-4 py-3">
+      <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-gray-200 px-4 py-3">
         <div className="flex items-center justify-around">
           <button
             onClick={() => setCurrentScreen('dashboard')}
@@ -84,7 +84,7 @@ export default function App() {
                 : 'text-gray-600 hover:bg-gray-50'
             }`}
           >
-            <Lightbulb className="w-5 h-5" />
+            <Brain className="w-5 h-5" />
             <span className="text-xs">Advisor</span>
           </button>
         </div>

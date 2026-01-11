@@ -1,10 +1,12 @@
 import { MessageCircle, User, Search } from 'lucide-react';
 import { useApi } from '../hooks/useApi';
-import fastAPIService from '../services/fastapi.service';
+import { mockService } from '../services/mock.service';
+// import { apiService } from '../services/api.service'; // Use this when Java backend is ready
 
 export function ConversationTimelineScreen() {
-  const { data: response, loading } = useApi(
-    () => fastAPIService.getConversations(),
+  const { data: conversations, loading } = useApi(
+    () => mockService.getConversations(),
+    // () => apiService.getConversations(0, 20),
     []
   );
 
@@ -15,43 +17,6 @@ export function ConversationTimelineScreen() {
       </div>
     );
   }
-
-  const conversations = response?.conversations || [];
-
-  // Group conversations by date
-  const groupedByDate = conversations.reduce((acc: any, conv: any) => {
-    const date = new Date(conv.timestamp).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-    
-    if (!acc[date]) {
-      acc[date] = [];
-    }
-    
-    // Add each conversation with its first item
-    if (conv.items && conv.items.length > 0) {
-      const firstItem = conv.items[0];
-      acc[date].push({
-        id: conv.conversationId,
-        timeFormatted: new Date(conv.timestamp).toLocaleTimeString('en-US', {
-          hour: 'numeric',
-          minute: '2-digit',
-        }),
-        content: firstItem.childText,
-        mood: firstItem.moodEmoji || '😊',
-        type: 'Chat',
-        flagged: firstItem.flagged || false,
-      });
-    }
-    
-    return acc;
-  }, {});
-
-  const sortedDates = Object.keys(groupedByDate).sort(
-    (a, b) => new Date(b).getTime() - new Date(a).getTime()
-  );
 
   return (
     <div className="p-4 space-y-4 bg-sand">
@@ -69,23 +34,23 @@ export function ConversationTimelineScreen() {
 
       {/* Timeline */}
       <div className="space-y-6">
-        {sortedDates.length > 0 ? (
-          sortedDates.map((date) => (
-            <div key={date} className="space-y-3">
+        {conversations && conversations.length > 0 ? (
+          conversations.map((day) => (
+            <div key={day.date} className="space-y-3">
               <div className="flex items-center gap-2 px-2">
                 <div className="h-px flex-1 bg-cloud" />
-                <span className="text-xs text-ink/60">{date}</span>
+                <span className="text-xs text-ink/60">{day.date}</span>
                 <div className="h-px flex-1 bg-cloud" />
               </div>
 
               <div className="space-y-2">
-                {groupedByDate[date].map((item: any) => (
+                {day.items.map((item) => (
                   <div
                     key={item.id}
                     className={[
                       'rounded-2xl border p-4 transition-all hover:shadow-sm',
                       item.flagged
-                        ? 'bg-rose/10 border-rose/60'
+                        ? 'bg-cloud border-rose/60'
                         : 'bg-offwhite border-cloud',
                     ].join(' ')}
                   >
@@ -104,7 +69,7 @@ export function ConversationTimelineScreen() {
                             </span>
 
                             {item.flagged && (
-                              <span className="text-xs bg-rose/60 text-offwhite px-2 py-0.5 rounded-full border border-rose/70">
+                              <span className="text-xs bg-mist/60 text-ink px-2 py-0.5 rounded-full border border-mist/70">
                                 Flagged
                               </span>
                             )}
@@ -152,8 +117,8 @@ export function ConversationTimelineScreen() {
       </div>
 
       {/* Load More */}
-      {sortedDates.length > 0 && (
-        <button className="w-full py-3 text-sm text-periwinkle hover:underline rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-periwinkle/30">
+      {conversations && conversations.length > 0 && (
+        <button className="w-full py-3 text-sm text-offwhite hover:underline rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-periwinkle/30">
           Load more conversations
         </button>
       )}
