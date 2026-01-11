@@ -13,7 +13,6 @@ This README explains the repository layout, how the Raspberry Pi side works, how
 - [How conversations are stored in MongoDB Atlas](#how-conversations-are-stored-in-mongodb-atlas)
 - [backend/worker.py — analysis pipeline (keywords, mood, flags)](#backendworkerpy---analysis-pipeline-keywords-mood-flags)
 - [How the app uses the analyzed data (parent dashboard)](#how-the-app-uses-the-analyzed-data-parent-dashboard)
-- [Data model (example)](#data-model-example)
 - [Running locally / environment variables (summary)](#running-locally--environment-variables-summary)
 - [Privacy & safety notes](#privacy--safety-notes)
 - [Contributing](#contributing)
@@ -45,7 +44,6 @@ The repository is organized to separate the Raspberry Pi client, backend service
 - `backend/`  
   Python-based backend API and supporting modules. Expected contents:
   - `backend/worker.py` — the analysis worker that processes conversations (see below)
-  - `requirements.txt` / `pyproject.toml` — Python dependencies
 
 - `frontend/`  
   TypeScript-based parent dashboard (single-page app). Expected contents:
@@ -166,9 +164,6 @@ Minimal steps and required variables (high-level):
    - `WORKER_POLL_INTERVAL` (optional)
    - `STT_SERVICE_URL` / credentials (if Pi streams audio to a STT)
    - `NOTIFICATION_EMAIL_CONFIG` (for alerts)
-3. Backend:
-   - Create virtualenv, `pip install -r requirements.txt`
-   - `python backend/api.py` (or start with `uvicorn backend.api:app --reload`)
 4. Worker:
    - `python backend/worker.py` (run as service or supervisor)
 5. Frontend:
@@ -203,8 +198,3 @@ This README intentionally provides a concise overview. See `docs/` for detailed 
 - For architecture changes (e.g., swapping the mood model), please add a design note in `docs/` and discuss in an issue before implementing.
 
 ---
-
-If you'd like, I can:
-- generate a more detailed step-by-step Pi setup guide,
-- add the exact env file templates (.env.example),
-- or produce a JSON Schema for the conversation documents to include in `models/`.
