@@ -18,6 +18,8 @@
     "@radix-ui/react-context-menu": "^2.2.16",
     "@radix-ui/react-dialog": "^1.1.6",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
+    "@radix-ui/react-hover-card": "^1.1.15",
+    "@radix-ui/react-label": "^2.1.8",
     "@radix-ui/react-menubar": "^1.1.16",
     "@radix-ui/react-navigation-menu": "^1.2.14",
     "@radix-ui/react-popover": "^1.1.15",
@@ -62,7 +64,7 @@
     "globals": "^16.5.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
-    "typescript": "^5.3.3",
+    "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.4",
     "vite": "^7.2.4"
   }

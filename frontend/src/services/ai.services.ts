@@ -1,3 +1,5 @@
+const AI_BASE_URL = (import.meta.env.VITE_AI_BASE_URL || '').replace(/\/$/, '');
+
 export interface ParentAdviceRequest {
   userId: string;
   latestMood: string | null;
@@ -12,9 +14,13 @@ export interface ParentAdviceResponse {
   error?: string;
 }
 
-export async function getParentAdvice(payload: ParentAdviceRequest): Promise<ParentAdviceResponse> {
+export async function getParentAdvice(
+  payload: ParentAdviceRequest
+): Promise<ParentAdviceResponse> {
+  const endpoint = `${AI_BASE_URL}/api/ai/parent-advice`;
+
   try {
-    const res = await fetch('/api/ai/parent-advice', {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -22,15 +28,12 @@ export async function getParentAdvice(payload: ParentAdviceRequest): Promise<Par
 
     if (!res.ok) {
       const errorText = await res.text();
-      console.error('AI service error response:', errorText);
-      return { success: false, error: `Server error: ${res.statusText}` };
+      return { success: false, error: errorText || `Server error: ${res.statusText}` };
     }
 
-    const data: ParentAdviceResponse = await res.json();
-    return data;
+    return (await res.json()) as ParentAdviceResponse;
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error('AI service network error:', errorMsg);
     return { success: false, error: `Network error: ${errorMsg}` };
   }
 }

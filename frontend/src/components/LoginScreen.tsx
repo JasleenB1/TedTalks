@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Lock, Mail } from 'lucide-react';
-import { mockService } from '../services/mock.service';
-//import { apiService } from '../services/api.service'; // Use this when Java backend is ready
+import { apiService } from '../services/api.service';
+import logo from '../assets/Logo.png';
 
 interface LoginScreenProps {
   onLogin: (token: string, userId: string) => void;
@@ -19,15 +19,14 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     setError(null);
 
     try {
-      const response = await mockService.login();
-      //const response = await apiService.login({ email, password });
+      const response = await apiService.login({ email, password });
 
       if (response.success && response.data) {
         onLogin(response.data.token, response.data.userId);
       } else {
         setError(response.error || 'Login failed');
       }
-    } catch (err) {
+    } catch {
       setError('Network error. Please try again.');
     } finally {
       setLoading(false);
@@ -36,19 +35,15 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-blush/70 via-cream to-cream flex flex-col items-center justify-center px-6 max-w-md mx-auto">
-      {/* subtle background tint */}
-
       <div className="relative w-full flex flex-col items-center justify-center">
-        {/* Logo/Icon Area */}
         <div className="mt-12 mb-4 text-center">
           <img
-            src="/src/assets/logo.png"
-            alt="TedTalk Logo"
+            src={logo}
+            alt="TedTalks logo"
             className="w-[360px] max-w-full h-auto mx-auto mb-2 object-contain"
           />
         </div>
 
-        {/* Login Form */}
         <div className="w-full bg-white rounded-2xl shadow-sm border border-cloud p-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
@@ -59,16 +54,16 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
 
             <div>
               <label htmlFor="email" className="block text-sm text-ink/80 mb-2">
-                Email Address
+                Parent Email or User ID
               </label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-ink/40" />
                 <input
                   id="email"
-                  type="email"
+                  type="text"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="parent@example.com"
+                  placeholder="child-1 or parent@example.com"
                   className="w-full pl-10 pr-4 py-3 bg-cream border border-sand/70 rounded-lg text-ink placeholder:text-ink/40 focus:outline-none focus:ring-2 focus:ring-periwinkle/30 focus:border-periwinkle disabled:opacity-60"
                   required
                   disabled={loading}
@@ -87,9 +82,8 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder="Optional if your backend auth is disabled"
                   className="w-full pl-10 pr-4 py-3 bg-cream border border-sand/70 rounded-lg text-ink placeholder:text-ink/40 focus:outline-none focus:ring-2 focus:ring-periwinkle/30 focus:border-periwinkle disabled:opacity-60"
-                  required
                   disabled={loading}
                 />
               </div>
@@ -100,31 +94,11 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
               disabled={loading}
               className="w-full bg-rose text-cream py-3 rounded-lg hover:bg-rose/90 transition-colors focus:outline-none focus:ring-2 focus:ring-rose/30 disabled:bg-cloud disabled:text-ink/60 disabled:cursor-not-allowed"
             >
-              {loading ? 'Signing in...' : 'Sign In'}
+              {loading ? 'Connecting...' : 'Open Dashboard'}
             </button>
           </form>
-
-          <div className="mt-4 text-center">
-            <a
-              href="#"
-              className="text-sm text-periwinkle hover:underline focus:outline-none focus:ring-2 focus:ring-periwinkle/30 rounded"
-            >
-              Forgot password?
-            </a>
-          </div>
         </div>
-
-        <p className="mt-6 text-sm text-ink/70 text-center">
-          Don&apos;t have an account?{' '}
-          <a
-            href="#"
-            className="text-periwinkle hover:underline focus:outline-none focus:ring-2 focus:ring-periwinkle/30 rounded"
-          >
-            Sign up
-          </a>
-        </p>
       </div>
     </div>
   );
 }
-

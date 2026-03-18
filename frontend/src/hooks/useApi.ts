@@ -3,7 +3,7 @@
  * Similar to Spring Boot's exception handling and response patterns
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { ApiResponse } from '../types';
 
 interface UseApiState<T> {
@@ -15,32 +15,53 @@ interface UseApiState<T> {
 
 export function useApi<T>(
   apiCall: () => Promise<ApiResponse<T>>,
-  dependencies: any[] = []
+  dependencies: unknown[] = [],
+  refreshIntervalMs?: number
 ): UseApiState<T> {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const hasLoadedRef = useRef(false);
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchData = async (background = false) => {
+    const shouldShowLoading = !background || !hasLoadedRef.current;
+
+    if (shouldShowLoading) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const response = await apiCall();
       if (response.success && response.data) {
         setData(response.data);
+        hasLoadedRef.current = true;
       } else {
         setError(response.error || 'An error occurred');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
-      setLoading(false);
+      if (shouldShowLoading) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    fetchData();
-  }, dependencies);
+    fetchData(false);
+
+    if (!refreshIntervalMs) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      fetchData(true);
+    }, refreshIntervalMs);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [refreshIntervalMs, ...dependencies]);
 
   return { data, loading, error, refetch: fetchData };
 }

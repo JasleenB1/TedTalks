@@ -1,27 +1,30 @@
 import { Clock, Smile, AlertCircle, TrendingUp, MessageCircle } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer } from 'recharts';
 import { useApi } from '../hooks/useApi';
-import { mockService } from '../services/mock.service';
-//import { apiService } from '../services/api.service'; // Use this when Java backend is ready
+import { apiService } from '../services/api.service';
+import type { Alert, MoodDataPoint } from '../types';
 
-export function DashboardScreen() {
-  // Fetch data from backend using custom hook
-  const { data: summary, loading: summaryLoading } = useApi(
-    () => mockService.getDashboardSummary(),
-    //() => apiService.getDashboardSummary(), // Use this when backend is ready
-    []
+interface DashboardScreenProps {
+  userId: string;
+}
+
+export function DashboardScreen({ userId }: DashboardScreenProps) {
+  const { data: summary, loading: summaryLoading, error: summaryError } = useApi(
+    () => apiService.getDashboardSummary(userId),
+    [userId],
+    5000
   );
 
   const { data: moodData, loading: moodLoading } = useApi(
-    () => mockService.getMoodTrends(),
-    // () => apiService.getMoodTrends(7), // Use this when backend is ready
-    []
+    () => apiService.getMoodTrends(userId, 7),
+    [userId],
+    5000
   );
 
   const { data: alerts, loading: alertsLoading } = useApi(
-    () => mockService.getAlerts(),
-    // () => apiService.getAlerts(0, 10), // Use this when backend is ready
-    []
+    () => apiService.getAlerts(userId, 0, 10),
+    [userId],
+    5000
   );
 
   if (summaryLoading || moodLoading || alertsLoading) {
@@ -32,23 +35,34 @@ export function DashboardScreen() {
     );
   }
 
-  // Weekly average mood (0-5 scale assumed)
-  
+  if (summaryError) {
+    return (
+      <div className="p-4 bg-sand min-h-[400px]">
+        <div className="bg-white border border-rose/30 text-ink rounded-2xl p-5">
+          Unable to load backend data. {summaryError}
+        </div>
+      </div>
+    );
+  }
+
+  const safeMoodData = moodData || [];
+  const safeAlerts = alerts || [];
   const weeklyAvg =
-    moodData && moodData.length > 0
-      ? (moodData.reduce((sum: number, item: any) => sum + item.mood, 0) / moodData.length).toFixed(1)
+    safeMoodData.length > 0
+      ? (
+          safeMoodData.reduce((sum: number, item: MoodDataPoint) => sum + item.mood, 0) /
+          safeMoodData.length
+        ).toFixed(1)
       : '0.0';
 
   return (
     <div className="p-4 space-y-4 bg-sand">
-      {/* Summary Block */}
       <div className="bg-white rounded-2xl border border-cloud p-5">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semi
-          bold text-ink">Today&apos;s Summary</h2>
+          <h2 className="font-semibold text-ink">Today&apos;s Summary</h2>
           <Clock className="w-5 h-5 text-ink/40" />
         </div>
-      
+
         <div className="grid grid-cols-3 gap-3">
           <div className="text-center p-3 bg-periwinkle/15 rounded-xl border border-cloud">
             <MessageCircle className="w-6 h-6 text-periwinkle mx-auto mb-1" />
@@ -64,7 +78,7 @@ export function DashboardScreen() {
 
           <div className="text-center p-3 bg-blush rounded-xl border border-sand/60">
             <Smile className="w-6 h-6 text-cocoa mx-auto mb-1" />
-            <div className="text-2xl text-ink">{summary?.currentMood || '😊'}</div>
+            <div className="text-2xl text-ink">{summary?.currentMood || 'No mood yet'}</div>
             <div className="text-xs text-ink/70">Mood</div>
           </div>
         </div>
@@ -84,7 +98,6 @@ export function DashboardScreen() {
         </div>
       </div>
 
-      {/* Mood Trends Block */}
       <div className="bg-white rounded-2xl border border-cloud p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-ink">Mood Trends</h2>
@@ -93,7 +106,7 @@ export function DashboardScreen() {
 
         <div className="h-40 -mx-2">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={moodData || []}>
+            <LineChart data={safeMoodData}>
               <XAxis
                 dataKey="day"
                 axisLine={false}
@@ -104,7 +117,7 @@ export function DashboardScreen() {
               <Line
                 type="monotone"
                 dataKey="mood"
-                stroke="#95a3d1" // periwinkle
+                stroke="#95a3d1"
                 strokeWidth={2}
                 dot={{ fill: '#95a3d1', r: 4 }}
               />
@@ -121,7 +134,6 @@ export function DashboardScreen() {
         </div>
       </div>
 
-      {/* Alerts & Check-ins Block */}
       <div className="bg-white rounded-2xl border border-cloud p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-ink">Alerts &amp; Check-ins</h2>
@@ -129,23 +141,13 @@ export function DashboardScreen() {
         </div>
 
         <div className="space-y-3">
-          {alerts && alerts.length > 0 ? (
-            alerts.map((alert: any) => (
+          {safeAlerts.length > 0 ? (
+            safeAlerts.map((alert: Alert) => (
               <div
                 key={alert.id}
                 className="flex gap-3 p-3 bg-cream rounded-xl border border-cloud"
               >
-                <div
-                  className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${
-                    alert.type === 'INFO'
-                      ? 'bg-periwinkle'
-                      : alert.type === 'SUCCESS'
-                      ? 'bg-mist'
-                      : alert.type === 'WARNING'
-                      ? 'bg-honey'
-                      : 'bg-rose'
-                  }`}
-                />
+                <div className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0 bg-honey" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-ink">{alert.message}</p>
                   <p className="text-xs text-ink/60 mt-0.5">{alert.timeAgo}</p>
@@ -156,14 +158,7 @@ export function DashboardScreen() {
             <div className="text-center text-ink/60 py-4 text-sm">No recent alerts</div>
           )}
         </div>
-
-        <button
-          className="w-full mt-3 py-2 text-sm text-periwinkle hover:bg-periwinkle/10 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-periwinkle/30"
-        >
-          View all alerts
-        </button>
       </div>
     </div>
   );
 }
-

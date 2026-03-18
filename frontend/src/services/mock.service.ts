@@ -70,21 +70,21 @@ export class MockService {
       success: true,
       data: [
         {
-          id: 1,
+          id: '1',
           type: 'INFO',
           message: 'Your kid is being bullied at school.',
           timestamp: new Date(Date.now() - 2 * 3600000).toISOString(),
           timeAgo: '3 mins ago',
         },
         {
-          id: 2,
+          id: '2',
           type: 'SUCCESS',
           message: 'Daily check-in completed',
           timestamp: new Date(Date.now() - 5 * 3600000).toISOString(),
           timeAgo: '5 hous ago',
         },
         {
-          id: 3,
+          id: '3',
           type: 'WARNING',
           message: 'Unusual conversation topic detected',
           timestamp: new Date(Date.now() - 86400000).toISOString(),
@@ -104,7 +104,7 @@ export class MockService {
           date: 'Today',
           items: [
             {
-              id: 101,
+              id: '101',
               timestamp: new Date().toISOString(),
               timeFormatted: '2:45 AM',
               type: 'QUESTION', 
@@ -113,7 +113,7 @@ export class MockService {
               flagged: false,
             },
             {
-              id: 102,
+              id: '102',
               timestamp: new Date(Date.now() - 3 * 3600000).toISOString(),
               timeFormatted: '1:30 AM',
               type: 'CHAT',
@@ -122,7 +122,7 @@ export class MockService {
               flagged: false,
             },
             {
-              id: 103,
+              id: '103',
               timestamp: new Date(Date.now() - 5 * 3600000).toISOString(),
               timeFormatted: '9:15 PM',
               type: 'STORY',
@@ -136,7 +136,7 @@ export class MockService {
           date: 'Yesterday',
           items: [
             {
-              id: 201,
+              id: '201',
               timestamp: new Date(Date.now() - 86400000 - 2 * 3600000).toISOString(),
               timeFormatted: '4:20 PM',
               type: 'QUESTION',
@@ -145,7 +145,7 @@ export class MockService {
               flagged: false,
             },
             {
-              id: 202,
+              id: '202',
               timestamp: new Date(Date.now() - 86400000 - 3 * 3600000).toISOString(),
               timeFormatted: '3:10 PM',
               type: 'CHAT',
@@ -154,7 +154,7 @@ export class MockService {
               flagged: true,
             },
             {
-              id: 203,
+              id: '203',
               timestamp: new Date(Date.now() - 86400000 - 6 * 3600000).toISOString(),
               timeFormatted: '10:00 AM',
               type: 'GAME',
@@ -168,7 +168,7 @@ export class MockService {
           date: 'Jan 8',
           items: [
             {
-              id: 301,
+              id: '301',
               timestamp: new Date(Date.now() - 2 * 86400000 - 1 * 3600000).toISOString(),
               timeFormatted: '5:30 PM',
               type: 'QUESTION',
@@ -177,7 +177,7 @@ export class MockService {
               flagged: false,
             },
             {
-              id: 302,
+              id: '302',
               timestamp: new Date(Date.now() - 2 * 86400000 - 4 * 3600000).toISOString(),
               timeFormatted: '2:15 PM',
               type: 'CHAT',

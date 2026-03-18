@@ -1,5 +1,3 @@
-// DTO-like interfaces that mirror Java backend models
-
 export interface LoginRequest {
   email: string;
   password: string;
@@ -26,21 +24,48 @@ export interface MoodDataPoint {
 }
 
 export interface Alert {
-  id: number;
+  id: string | number;
   type: 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR';
   message: string;
   timestamp: string;
   timeAgo: string;
 }
 
+export interface BackendEventRecord {
+  id: string;
+  userId: string;
+  deviceId: string;
+  sessionId: string;
+  timestamp: string;
+  childText: string;
+  aiText: string;
+  eventType: string;
+  analysisStatus: string;
+  keywords: string[];
+  emotionLabel: string | null;
+  moodEmoji: string | null;
+  topicLabel: string | null;
+  summaryText: string | null;
+  flagged: boolean;
+  flagReasons: string[];
+  interactionCount: number;
+}
+
 export interface ConversationItem {
-  id: number;
+  id: string;
   timestamp: string;
   timeFormatted: string;
-  type: 'QUESTION' | 'CHAT' | 'STORY' | 'GAME';
+  type: string;
   content: string;
   mood: string;
   flagged: boolean;
+  topic?: string | null;
+  keywords?: string[];
+  summary?: string | null;
+  aiReply?: string;
+  sessionId?: string;
+  interactionCount?: number;
+  analysisStatus?: string;
 }
 
 export interface ConversationDay {
@@ -67,4 +92,3 @@ export interface ApiResponse<T> {
   error?: string;
   timestamp: string;
 }
-
