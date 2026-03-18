@@ -8,6 +8,36 @@ interface ConversationTimelineScreenProps {
   userId: string;
 }
 
+function buildSafeSummary(item: ConversationItem): string {
+  if (item.summary?.trim()) {
+    const summary = item.summary.trim();
+    const lowerSummary = summary.toLowerCase();
+
+    if (
+      !lowerSummary.includes(item.content.trim().toLowerCase()) &&
+      summary !== item.content.trim()
+    ) {
+      return summary;
+    }
+  }
+
+  const typeLabel = item.type ? item.type.toLowerCase() : 'conversation';
+  const moodLabel = item.mood ? `Mood was ${item.mood}.` : '';
+  const topicLabel = item.topic ? `Child asked about ${item.topic}.` : `Child had a ${typeLabel}.`;
+  const keywordLabel =
+    item.keywords && item.keywords.length > 0
+      ? `Main themes: ${item.keywords.slice(0, 3).join(', ')}.`
+      : '';
+
+  const synthesized = [topicLabel, moodLabel, keywordLabel].filter(Boolean).join(' ');
+
+  if (synthesized) {
+    return synthesized;
+  }
+
+  return 'Child had a conversation. Summary details are limited for privacy.';
+}
+
 export function ConversationTimelineScreen({ userId }: ConversationTimelineScreenProps) {
   const [search, setSearch] = useState('');
   const { data: conversations, loading, error } = useApi(
@@ -123,15 +153,27 @@ export function ConversationTimelineScreen({ userId }: ConversationTimelineScree
                           <span className="text-base">{item.mood}</span>
                         </div>
 
-                        <p className="text-sm text-ink">{item.content}</p>
-
-                        {item.aiReply && (
-                          <div className="rounded-xl border border-cloud bg-white/70 p-3">
-                            <div className="flex items-center gap-2 mb-1 text-xs text-ink/60">
-                              <Bot className="w-3.5 h-3.5" />
-                              TedTalks reply
+                        {item.flagged ? (
+                          <>
+                            <div className="rounded-xl border border-rose/25 bg-white/80 p-3">
+                              <div className="text-xs text-ink/60 mb-1">Raw child message</div>
+                              <p className="text-sm text-ink">{item.content}</p>
                             </div>
-                            <p className="text-sm text-ink">{item.aiReply}</p>
+
+                            {item.aiReply && (
+                              <div className="rounded-xl border border-cloud bg-white/70 p-3">
+                                <div className="flex items-center gap-2 mb-1 text-xs text-ink/60">
+                                  <Bot className="w-3.5 h-3.5" />
+                                  TedTalks reply
+                                </div>
+                                <p className="text-sm text-ink">{item.aiReply}</p>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="rounded-xl border border-cloud bg-white/70 p-3">
+                            <div className="text-xs text-ink/60 mb-1">Conversation summary</div>
+                            <p className="text-sm text-ink">{buildSafeSummary(item)}</p>
                           </div>
                         )}
 
