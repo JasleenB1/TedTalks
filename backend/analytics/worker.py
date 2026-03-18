@@ -7,9 +7,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
-from pymongo import MongoClient
-from pymongo.collection import Collection
-from pymongo.errors import PyMongoError
+import mysql.connector
+from mysql.connector import Error
 
 load_dotenv()  # loads backend/.env when you run from backend/
 
@@ -17,15 +16,17 @@ load_dotenv()  # loads backend/.env when you run from backend/
 # -----------------------------
 # Config
 # -----------------------------
-MONGODB_URI = os.getenv("MONGODB_URI")
-DB_NAME = os.getenv("MONGODB_DB")
-COLL_NAME = os.getenv("MONGODB_COLLECTION", "chat_events")
+MYSQL_HOST = os.getenv("MYSQL_HOST", "127.0.0.1")
+MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
+MYSQL_USER = os.getenv("MYSQL_USER", "root")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "")
+MYSQL_DB = os.getenv("MYSQL_DB", "teddy_db")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 USE_GEMINI = bool(GEMINI_API_KEY)
 
-BATCH_LIMIT = int(os.getenv("BATCH_LIMIT", "200"))  # how many pending docs to process on startup
+BATCH_LIMIT = int(os.getenv("BATCH_LIMIT", "200"))  # how many pending rows to process on startup
 SLEEP_ON_IDLE_SEC = float(os.getenv("SLEEP_ON_IDLE_SEC", "0.2"))
 
 ALLOWED_EMOTIONS = ["happy", "excited", "calm", "neutral", "sad", "anxious", "angry", "frustrated", "tired"]
@@ -43,29 +44,25 @@ EMOJI_MAP = {
     "tired": "🥱",
 }
 
-FLAG_RULES = {
-    # "low" = concerning but common
-    "low": [
-        "\bscared\b", "\bafraid\b", "\bworry\b", "\bworried\b",
-        "\bnightmare\b", "\bbad dream\b",
-    ],
-    # "medium" = pain/injury/sickness signals
-    "medium": [
-        "\bpain\b", "\bhurt\b", "\binjured\b", "\bbleed\b", "\bblood\b",
-        "\bsick\b", "\bthrow up\b", "\bvomit\b",
-    ],
-    # "high" = urgent safety signals (keep this; even for demo it’s important)
-    "high": [
-        "\bkill myself\b", "\bsuicide\b", "\bself[- ]?harm\b", "\bhurt myself\b",
-        "\babuse\b", "\brape\b", "\bmolest\b",
-    ],
-}
+FLAG_PATTERNS = [
+    r"\bbully\b", r"\bbullied\b", r"\bbullying\b",
+    r"\bharass\b", r"\bharassing\b", r"\bthreat\b", r"\bthreatened\b",
+    r"\bmean to me\b", r"\bpicked on\b",
+    r"\bkill myself\b", r"\bsuicide\b", r"\bself[- ]?harm\b", r"\bhurt myself\b",
+    r"\babuse\b", r"\brape\b", r"\bmolest\b", r"\bsexual\b",
+]
+
 
 # -----------------------------
 # Helpers
 # -----------------------------
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def now_mysql_dt() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+
 
 def clamp_list_str(x: Any, max_len: int = 12) -> List[str]:
     if not isinstance(x, list):
@@ -79,11 +76,13 @@ def clamp_list_str(x: Any, max_len: int = 12) -> List[str]:
             break
     return out
 
+
 STOPWORDS = set("""
 a an the and or but if then this that those these i you he she they we it
 to of in on for with at by from as is are was were be been being
 my your his her their our me him them us
 """.split())
+
 
 def simple_keywords(text: str, k: int = 10) -> List[str]:
     tokens = re.findall(r"[A-Za-z']+", (text or "").lower())
@@ -95,15 +94,17 @@ def simple_keywords(text: str, k: int = 10) -> List[str]:
     top = sorted(freq.items(), key=lambda x: (-x[1], x[0]))[:k]
     return [w for w, _ in top]
 
+
 TOPIC_HINTS = {
     "school": ["teacher", "homework", "class", "school", "sticker", "test", "grade", "math", "science"],
-    "friends": ["friend", "friends", "bully", "playdate", "party", "bestie", "mean", "argue"],
+    "friends": ["friend", "friends", "bully", "bullied", "bullying", "playdate", "party", "bestie", "mean", "argue", "harass", "threat"],
     "family": ["mom", "dad", "mother", "father", "sister", "brother", "grandma", "grandpa", "aunt", "uncle"],
     "sleep": ["sleep", "tired", "sleepy", "nightmare", "bed", "wake", "dream"],
     "health": ["hurt", "sick", "doctor", "pain", "stomach", "headache", "medicine"],
     "games": ["game", "roblox", "minecraft", "fortnite", "playstation", "switch", "xbox"],
     "story": ["story", "teddy", "bear", "zoo", "adventure", "dragon", "princess"],
 }
+
 
 def infer_topic(text: str) -> str:
     t = (text or "").lower()
@@ -114,13 +115,16 @@ def infer_topic(text: str) -> str:
             best_topic, best_score = topic, score
     return best_topic if best_topic in ALLOWED_TOPICS else "general"
 
+
 def infer_emotion(text: str) -> str:
     t = (text or "").lower()
-    if any(x in t for x in ["yay", "awesome", "great", "happy", "excited", "so cool", "sticker"]):
-        return "happy"
-    if any(x in t for x in ["worried", "scared", "anxious", "nervous", "afraid", "what if"]):
+
+    if any(x in t for x in [
+        "bullied", "bully", "bullying", "harassed", "harassing", "threatened",
+        "unsafe", "scared", "afraid", "worried", "anxious", "nervous", "what if"
+    ]):
         return "anxious"
-    if any(x in t for x in ["sad", "cry", "lonely", "upset"]):
+    if any(x in t for x in ["sad", "cry", "lonely", "upset", "mean to me", "picked on"]):
         return "sad"
     if any(x in t for x in ["angry", "mad", "hate", "furious"]):
         return "angry"
@@ -130,16 +134,29 @@ def infer_emotion(text: str) -> str:
         return "tired"
     if any(x in t for x in ["calm", "relaxed", "okay"]):
         return "calm"
+    if any(x in t for x in ["yay", "awesome", "great", "happy", "excited", "so cool", "sticker"]):
+        return "happy"
+
     return "neutral"
 
-FLAG_PATTERNS = [
-    "\bkill myself\b", "\bsuicide\b", "\bself harm\b", "\bhurt myself\b",
-    "\brape\b", "\bsexual\b", "\babuse\b"
-]
 
 def heuristic_flag(text: str) -> bool:
     t = (text or "").lower()
     return any(re.search(p, t) for p in FLAG_PATTERNS)
+
+
+def extract_flag_reasons(text: str) -> List[str]:
+    t = (text or "").lower()
+    reasons: List[str] = []
+
+    for pat in FLAG_PATTERNS:
+        if re.search(pat, t):
+            cleaned = pat.replace(r"\b", "").replace("\\", "")
+            if cleaned not in reasons:
+                reasons.append(cleaned)
+
+    return reasons
+
 
 def safe_summary(child_text: str) -> str:
     s = (child_text or "").strip()
@@ -147,28 +164,6 @@ def safe_summary(child_text: str) -> str:
         s = s[:160].rstrip() + "…"
     return s
 
-def detect_flags(child_text: str) -> dict:
-    text = (child_text or "").lower()
-    reasons = []
-    level = None
-
-    # check high -> medium -> low
-    for lvl in ["high", "medium", "low"]:
-        hits = []
-        for pat in FLAG_RULES[lvl]:
-            if re.search(pat, text):
-                # store a readable reason (pattern stripped)
-                hits.append(pat.strip(r"\b").replace(r"\b", "").replace("\\", ""))
-        if hits:
-            reasons.extend(hits)
-            level = lvl
-            break
-
-    return {
-        "flagged": bool(level),
-        "flagLevel": level,                 # None if not flagged
-        "flagReasons": sorted(set(reasons)) # unique reasons
-    }
 
 # -----------------------------
 # Analyzer (Gemini optional)
@@ -190,12 +185,12 @@ def gemini_analyze(child_text: str, assistant_text: str) -> Dict[str, Any]:
     prompt = f"""
 Return STRICT JSON only (no markdown). Schema:
 {{
-  "keywords": ["..."],  // 5-12 short keywords/phrases
+  "keywords": ["..."],
   "emotionLabel": "{'|'.join(ALLOWED_EMOTIONS)}",
   "moodEmoji": "😀",
   "topicLabel": "{'|'.join(ALLOWED_TOPICS)}",
-  "summary": "...",     // 1 sentence
-  "flagged": false      // true ONLY for self-harm, violence, abuse, or sexual content
+  "summary": "...",
+  "flagged": false
 }}
 
 Conversation:
@@ -228,6 +223,7 @@ Assistant: {assistant_text}
         "analysisMode": "gemini",
     }
 
+
 def fallback_analyze(child_text: str, assistant_text: str) -> Dict[str, Any]:
     emo = infer_emotion(child_text)
     topic = infer_topic(child_text)
@@ -244,141 +240,352 @@ def fallback_analyze(child_text: str, assistant_text: str) -> Dict[str, Any]:
 
 
 # -----------------------------
-# Core worker
+# MySQL Core
 # -----------------------------
-def get_collection() -> Collection:
-    if not MONGODB_URI or not DB_NAME:
-        raise SystemExit("ERROR: Set MONGODB_URI and MONGODB_DB in backend/.env")
-    client = MongoClient(MONGODB_URI)
-    return client[DB_NAME][COLL_NAME]
+def get_connection():
+    try:
+        conn = mysql.connector.connect(
+            host=MYSQL_HOST,
+            port=MYSQL_PORT,
+            user=MYSQL_USER,
+            password=MYSQL_PASSWORD,
+            database=MYSQL_DB,
+            autocommit=False
+        )
+        return conn
+    except Error as e:
+        raise SystemExit(f"ERROR: Could not connect to MySQL: {e}")
 
-def claim_doc_for_processing(coll: Collection, _id: Any) -> Optional[Dict[str, Any]]:
-    """
-    Atomically claim a PENDING doc -> PROCESSING so only one worker processes it.
-    Returns the doc if claim succeeded, else None.
-    """
-    return coll.find_one_and_update(
-        {"_id": _id, "analysisStatus": "PENDING"},
-        {"$set": {"analysisStatus": "PROCESSING", "processingAt": now_iso()}},
-        return_document=True,
+
+def ensure_column(conn, table_name: str, column_name: str, column_sql: str) -> None:
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM information_schema.columns
+        WHERE table_schema = %s
+          AND table_name = %s
+          AND column_name = %s
+    """, (MYSQL_DB, table_name, column_name))
+    exists = cursor.fetchone()[0] > 0
+    if not exists:
+        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}")
+        conn.commit()
+    cursor.close()
+
+
+def ensure_index(conn, table_name: str, index_name: str, create_sql: str) -> None:
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM information_schema.statistics
+        WHERE table_schema = %s
+          AND table_name = %s
+          AND index_name = %s
+    """, (MYSQL_DB, table_name, index_name))
+    exists = cursor.fetchone()[0] > 0
+    if not exists:
+        cursor.execute(create_sql)
+        conn.commit()
+    cursor.close()
+
+
+def init_schema(conn) -> None:
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS events (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            user_id VARCHAR(100) NOT NULL,
+            device_id VARCHAR(100) NOT NULL,
+            session_id VARCHAR(64) NOT NULL,
+            timestamp_utc DATETIME(6) NOT NULL,
+            child_text TEXT NOT NULL,
+            ai_text TEXT NOT NULL,
+            event_type VARCHAR(50) NOT NULL DEFAULT 'CHAT',
+            analysis_status VARCHAR(50) NOT NULL DEFAULT 'PENDING'
+        )
+    """)
+    conn.commit()
+    cursor.close()
+
+    # Add analysis columns if missing
+    ensure_column(conn, "events", "processing_at", "processing_at DATETIME(6) NULL")
+    ensure_column(conn, "events", "analyzed_at", "analyzed_at DATETIME(6) NULL")
+    ensure_column(conn, "events", "failed_at", "failed_at DATETIME(6) NULL")
+    ensure_column(conn, "events", "fail_reason", "fail_reason VARCHAR(300) NULL")
+
+    ensure_column(conn, "events", "keywords_json", "keywords_json JSON NULL")
+    ensure_column(conn, "events", "emotion_label", "emotion_label VARCHAR(50) NULL")
+    ensure_column(conn, "events", "mood_emoji", "mood_emoji VARCHAR(16) NULL")
+    ensure_column(conn, "events", "topic_label", "topic_label VARCHAR(50) NULL")
+    ensure_column(conn, "events", "summary_text", "summary_text TEXT NULL")
+    ensure_column(conn, "events", "analysis_mode", "analysis_mode VARCHAR(50) NULL")
+    ensure_column(conn, "events", "analysis_error", "analysis_error VARCHAR(200) NULL")
+
+    ensure_column(conn, "events", "interaction_count", "interaction_count INT NOT NULL DEFAULT 1")
+
+    ensure_column(conn, "events", "flagged", "flagged BOOLEAN NOT NULL DEFAULT FALSE")
+    ensure_column(conn, "events", "flag_reasons_json", "flag_reasons_json JSON NULL")
+    ensure_column(conn, "events", "flagged_at", "flagged_at DATETIME(6) NULL")
+
+    # Helpful indexes
+    ensure_index(
+        conn,
+        "events",
+        "idx_analysis_status",
+        "CREATE INDEX idx_analysis_status ON events (analysis_status)"
+    )
+    ensure_index(
+        conn,
+        "events",
+        "idx_event_type",
+        "CREATE INDEX idx_event_type ON events (event_type)"
+    )
+    ensure_index(
+        conn,
+        "events",
+        "idx_session_id",
+        "CREATE INDEX idx_session_id ON events (session_id)"
     )
 
-def analyze_and_update(coll: Collection, doc: Dict[str, Any]) -> None:
-    child_text = doc.get("childText", "") or ""
-    flag_info = detect_flags(child_text)
-    assistant_text = doc.get("assistantText", "") or ""
+
+def claim_row_for_processing(conn, row_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Atomically claim a PENDING row -> PROCESSING so only one worker processes it.
+    Returns the row if claim succeeded, else None.
+    """
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+        UPDATE events
+        SET analysis_status = 'PROCESSING',
+            processing_at = %s
+        WHERE id = %s
+          AND analysis_status = 'PENDING'
+    """, (now_mysql_dt(), row_id))
+
+    conn.commit()
+
+    if cursor.rowcount == 0:
+        cursor.close()
+        return None
+
+    cursor.execute("SELECT * FROM events WHERE id = %s", (row_id,))
+    row = cursor.fetchone()
+    cursor.close()
+    return row
+
+
+def count_interactions_in_session(conn, session_id: Optional[str]) -> int:
+    if not session_id:
+        return 1
+
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM events
+        WHERE session_id = %s
+          AND event_type = 'CHAT'
+    """, (session_id,))
+    count = cursor.fetchone()[0]
+    cursor.close()
+    return int(count or 1)
+
+
+def analyze_and_update(conn, row: Dict[str, Any]) -> None:
+    child_text = row.get("child_text", "") or ""
+    assistant_text = row.get("ai_text", "") or ""
 
     if not child_text.strip():
-        # Nothing to analyze: mark done
-        coll.update_one(
-            {"_id": doc["_id"]},
-            {"$set": {"analysisStatus": "DONE", "analyzedAt": now_iso(), "analysisMode": "empty"}}
-        )
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE events
+            SET analysis_status = 'DONE',
+                analyzed_at = %s,
+                analysis_mode = 'empty'
+            WHERE id = %s
+        """, (now_mysql_dt(), row["id"]))
+        conn.commit()
+        cursor.close()
         return
 
     try:
         analysis = gemini_analyze(child_text, assistant_text) if USE_GEMINI else fallback_analyze(child_text, assistant_text)
     except Exception as e:
-        # If Gemini fails, fallback (so you still get results)
         analysis = fallback_analyze(child_text, assistant_text)
         analysis["analysisError"] = f"gemini_failed: {str(e)[:200]}"
 
-    # interactionCount: count docs in same conversationId (each doc = 1 interaction)
-    conversation_id = doc.get("conversationId")
-    interaction_count = 1
-    if conversation_id:
-        interaction_count = coll.count_documents({"conversationId": conversation_id, "type": "CHAT"})
+    interaction_count = count_interactions_in_session(conn, row.get("session_id"))
+
+    rule_flagged = heuristic_flag(child_text)
+    rule_reasons = extract_flag_reasons(child_text)
+
+    final_flagged = bool(rule_flagged or analysis.get("flagged", False))
+    final_flag_reasons = list(rule_reasons)
+
+    if analysis.get("flagged", False) and not final_flag_reasons:
+        final_flag_reasons = ["model_flagged"]
 
     update_fields = {
         **analysis,
         "analysisStatus": "DONE",
-        "analyzedAt": now_iso(),
+        "analyzedAt": now_mysql_dt(),
         "interactionCount": int(interaction_count),
-
-        # flags for parent alerting
-        "flagged": flag_info["flagged"],          
-        "flagLevel": flag_info["flagLevel"],
-        "flagReasons": flag_info["flagReasons"],
-        "flaggedAt": now_iso() if flag_info["flagged"] else None,
+        "flagged": final_flagged,
+        "flagReasons": final_flag_reasons,
+        "flaggedAt": now_mysql_dt() if final_flagged else None,
     }
 
-    coll.update_one({"_id": doc["_id"]}, {"$set": update_fields})
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE events
+        SET keywords_json = %s,
+            emotion_label = %s,
+            mood_emoji = %s,
+            topic_label = %s,
+            summary_text = %s,
+            flagged = %s,
+            analysis_mode = %s,
+            analysis_error = %s,
+            analysis_status = %s,
+            analyzed_at = %s,
+            interaction_count = %s,
+            flag_reasons_json = %s,
+            flagged_at = %s
+        WHERE id = %s
+    """, (
+        json.dumps(update_fields["keywords"], ensure_ascii=False),
+        update_fields["emotionLabel"],
+        update_fields["moodEmoji"],
+        update_fields["topicLabel"],
+        update_fields["summary"],
+        bool(update_fields["flagged"]),
+        update_fields["analysisMode"],
+        update_fields.get("analysisError"),
+        update_fields["analysisStatus"],
+        update_fields["analyzedAt"],
+        update_fields["interactionCount"],
+        json.dumps(update_fields["flagReasons"], ensure_ascii=False),
+        update_fields["flaggedAt"],
+        row["id"],
+    ))
+    conn.commit()
+    cursor.close()
 
-    print(f"[worker] DONE _id={doc['_id']} emo={update_fields['emotionLabel']} topic={update_fields['topicLabel']} interactions={update_fields['interactionCount']}")
+    print(
+        f"[worker] DONE id={row['id']} "
+        f"emo={update_fields['emotionLabel']} "
+        f"topic={update_fields['topicLabel']} "
+        f"flagged={int(bool(update_fields['flagged']))} "
+        f"interactions={update_fields['interactionCount']}"
+    )
 
-def process_pending_batch(coll: Collection, limit: int) -> int:
+
+def mark_failed(conn, row_id: int, reason: str) -> None:
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE events
+        SET analysis_status = 'FAILED',
+            failed_at = %s,
+            fail_reason = %s
+        WHERE id = %s
+    """, (now_mysql_dt(), reason[:300], row_id))
+    conn.commit()
+    cursor.close()
+
+
+def process_pending_batch(conn, limit: int) -> int:
     """
-    On startup, process already-existing PENDING docs.
+    On startup, process already-existing PENDING rows.
     """
-    pending = list(coll.find(
-        {"type": "CHAT", "analysisStatus": "PENDING"},
-        {"_id": 1}
-    ).limit(limit))
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT id
+        FROM events
+        WHERE event_type = 'CHAT'
+          AND analysis_status = 'PENDING'
+        ORDER BY id ASC
+        LIMIT %s
+    """, (limit,))
+    pending = cursor.fetchall()
+    cursor.close()
 
     processed = 0
     for item in pending:
-        claimed = claim_doc_for_processing(coll, item["_id"])
+        claimed = claim_row_for_processing(conn, item["id"])
         if not claimed:
             continue
         try:
-            analyze_and_update(coll, claimed)
+            analyze_and_update(conn, claimed)
             processed += 1
         except Exception as e:
-            coll.update_one(
-                {"_id": item["_id"]},
-                {"$set": {"analysisStatus": "FAILED", "failedAt": now_iso(), "failReason": str(e)[:300]}}
-            )
+            mark_failed(conn, item["id"], str(e))
     return processed
 
-def watch_inserts(coll: Collection) -> None:
+
+def process_new_pending_once(conn) -> int:
     """
-    Realtime: watch new inserts; if analysisStatus == PENDING, process it.
+    Poll for new pending rows and process them.
     """
-    pipeline = [{"$match": {"operationType": "insert"}}]
-    print(f"[worker] Realtime watch ON | {DB_NAME}.{COLL_NAME} | Gemini={USE_GEMINI}")
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT id
+        FROM events
+        WHERE event_type = 'CHAT'
+          AND analysis_status = 'PENDING'
+        ORDER BY id ASC
+        LIMIT %s
+    """, (BATCH_LIMIT,))
+    rows = cursor.fetchall()
+    cursor.close()
 
-    with coll.watch(pipeline, full_document="updateLookup") as stream:
-        for change in stream:
-            doc = change.get("fullDocument") or {}
-            if doc.get("type") != "CHAT":
-                continue
-            if doc.get("analysisStatus") != "PENDING":
-                continue
+    processed = 0
+    for item in rows:
+        claimed = claim_row_for_processing(conn, item["id"])
+        if not claimed:
+            continue
+        try:
+            analyze_and_update(conn, claimed)
+            processed += 1
+        except Exception as e:
+            mark_failed(conn, item["id"], str(e))
 
-            claimed = claim_doc_for_processing(coll, doc["_id"])
-            if not claimed:
-                continue
+    return processed
 
-            try:
-                analyze_and_update(coll, claimed)
-            except Exception as e:
-                coll.update_one(
-                    {"_id": doc["_id"]},
-                    {"$set": {"analysisStatus": "FAILED", "failedAt": now_iso(), "failReason": str(e)[:300]}}
-                )
 
 def main():
-    coll = get_collection()
+    conn = get_connection()
+    init_schema(conn)
 
-    # 1) Startup backfill for any docs already in DB
+    print(f"[worker] MySQL connected | {MYSQL_HOST}:{MYSQL_PORT} | DB={MYSQL_DB} | Gemini={USE_GEMINI}")
+
+    # 1) Startup backfill for any rows already in DB
     try:
-        n = process_pending_batch(coll, BATCH_LIMIT)
+        n = process_pending_batch(conn, BATCH_LIMIT)
         if n:
             print(f"[worker] processed pending on startup: {n}")
     except Exception as e:
         print("[worker] startup pending processing error:", str(e))
 
-    # 2) Realtime watcher
+    # 2) Poll loop for new rows
     while True:
         try:
-            watch_inserts(coll)
-        except PyMongoError as e:
-            # Auto-reconnect loop if stream drops
-            print("[worker] change stream error, retrying:", str(e))
+            processed = process_new_pending_once(conn)
+            if processed == 0:
+                time.sleep(SLEEP_ON_IDLE_SEC)
+        except mysql.connector.Error as e:
+            print("[worker] MySQL error, retrying:", str(e))
             time.sleep(1.5)
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = get_connection()
+            init_schema(conn)
         except Exception as e:
             print("[worker] unexpected error, retrying:", str(e))
             time.sleep(1.5)
+
 
 if __name__ == "__main__":
     main()
