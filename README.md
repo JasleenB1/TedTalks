@@ -1,47 +1,69 @@
 # TedTalks
 
-TedTalks is a parent-facing monitoring dashboard plus a Raspberry Pi voice chatbot for kids.
+TedTalks is a voice-enabled teddy bear companion plus a parent-facing monitoring dashboard.
 
-The current codebase works like this:
+This repository contains four connected parts:
 
-1. The Raspberry Pi listens for speech, transcribes it, generates a Teddy reply, speaks the reply back, and saves each exchange into MySQL.
-2. The backend analysis worker reads new MySQL rows marked `PENDING`, analyzes them, and writes back mood, summary, topic, keywords, and alert metadata.
-3. A lightweight Python API server reads those MySQL rows and exposes dashboard-friendly endpoints.
-4. The React frontend calls that API and shows parents a privacy-aware dashboard:
-   - summarized timeline entries for normal conversations
-   - full raw text only for flagged alerts
-   - mood trends, alerts, and parent advice
+1. A Raspberry Pi runtime that listens, transcribes, generates a child-safe reply, speaks it back, and writes the interaction into MySQL.
+2. A backend worker that continuously analyzes new conversation rows and enriches them with topic, emotion, summary, and flag metadata.
+3. A lightweight Python API server that launches the worker automatically and exposes parent-safe JSON endpoints.
+4. A React frontend that shows summaries, alerts, mood trends, and parent review screens.
 
-## Repository Layout
+## Technical Overview
 
-- `backend-raspi/`
-  Raspberry Pi runtime. Records audio, transcribes it, generates a response, speaks it, and inserts raw events into MySQL.
+### Runtime components
 
-- `backend/analytics/worker.py`
-  Analysis worker. Polls the `events` table for `analysis_status = 'PENDING'` and updates rows with analysis results.
+`backend-raspi/chatbot.py`
 
-- `backend/api_server.py`
-  Lightweight local API server used by the frontend during demos and local development.
+- Records audio with `parec`
+- Detects end-of-speech with simple RMS-based VAD
+- Transcribes with Faster-Whisper
+- Generates replies with Ollama
+- Speaks responses with Kokoro TTS and `pacat`
+- Inserts a raw conversation row into MySQL with `analysis_status = 'PENDING'`
 
-- `frontend/`
-  React + Vite parent dashboard.
+`backend/analytics/worker.py`
 
-- `.env`
-  Shared backend-side environment variables, including MySQL credentials and default `USER_ID`.
+- Polls the `events` table for `PENDING` chat rows
+- Claims rows as `PROCESSING`
+- Analyzes the interaction with Gemini or fallback heuristics
+- Writes `topic_label`, `emotion_label`, `summary_text`, `flagged`, `flag_reasons_json`, and related metadata back to the same row
+- Sends a short email alert when a flagged conversation is detected
 
-## End-to-End Data Flow
+`backend/api_server.py`
 
-### 1. Raspberry Pi captures a conversation
+- Starts the backend worker automatically
+- Reads analyzed rows from MySQL
+- Returns frontend-ready JSON
+- Filters parent-facing timeline data to `DONE` rows so unfinished analysis stays hidden
 
-The Raspberry Pi app in [chatbot.py](/c:/Users/owake/Desktop/TedTalks/backend-raspi/chatbot.py):
+`frontend/`
 
-- records audio with `parec`
-- uses simple voice activity detection to stop recording after silence
+- React + Vite application
+- Polls backend endpoints for dashboard updates
+- Shows summarized non-flagged conversations
+- Shows raw flagged content for parent review
+- Renders Ontario time for timeline and dashboard displays
+
+## End-to-End Flow
+
+### 1. Child talks to TedTalks
+
+The child speaks into the Raspberry Pi device.
+
+The Pi runtime:
+
+- opens the microphone with PulseAudio
+- records until silence is detected
+- saves audio to a temporary WAV
 - transcribes speech with Faster-Whisper
-- generates a child-safe reply using Ollama
-- speaks the reply with Kokoro TTS and `pacat`
+- sends the text prompt to Ollama
+- receives a child-friendly response
+- speaks the reply with Kokoro TTS
 
-For each turn, it writes one row into the MySQL `events` table:
+### 2. Raw interaction is stored
+
+Each interaction is saved to the MySQL `events` table with fields like:
 
 - `user_id`
 - `device_id`
@@ -52,88 +74,57 @@ For each turn, it writes one row into the MySQL `events` table:
 - `event_type`
 - `analysis_status`
 
-New rows are inserted with:
+New chat rows are inserted as:
 
 - `event_type = 'CHAT'`
 - `analysis_status = 'PENDING'`
 
-That means the raw conversation is stored first, then analyzed afterward.
+### 3. Worker enriches the row
 
-### 2. The analysis worker enriches the row
+The backend worker continuously scans for pending rows.
 
-The worker in [worker.py](/c:/Users/owake/Desktop/TedTalks/backend/analytics/worker.py):
+For each new row it:
 
-- connects to the same MySQL database
-- ensures required columns and indexes exist
-- repeatedly polls for `PENDING` rows
-- claims rows by changing them to `PROCESSING`
-- analyzes the conversation text
-- writes results back to the same row
+- claims the row by updating it to `PROCESSING`
+- analyzes the child text and assistant text
+- infers topic and emotion
+- generates a summary
+- checks for flag patterns such as bullying, threats, self-harm, abuse, or unsafe situations
+- marks the row `DONE`
 
-The worker fills fields such as:
+If the row is flagged, the worker also sends a short alert email to the current demo alert recipient configured in code.
 
-- `keywords_json`
-- `emotion_label`
-- `mood_emoji`
-- `topic_label`
-- `summary_text`
-- `flagged`
-- `flag_reasons_json`
-- `interaction_count`
-- `analysis_status = 'DONE'`
+### 4. API serves parent-safe data
 
-Analysis can happen in two modes:
+The frontend does not talk to MySQL directly.
 
-- Gemini mode, if `GEMINI_API_KEY` is set
-- fallback heuristic mode, if Gemini is unavailable
+Instead, the API server reads analyzed rows and returns:
 
-### 3. The API server exposes frontend endpoints
-
-The frontend does not connect directly to MySQL. Instead, [api_server.py](/c:/Users/owake/Desktop/TedTalks/backend/api_server.py) reads MySQL and exposes JSON endpoints.
-
-This is important for privacy and security because:
-
-- browser code must not contain raw MySQL credentials
-- the backend controls what fields the parent UI receives
-- privacy rules can be enforced centrally
-
-Current API endpoints:
-
-- `GET /api/health`
-- `POST /api/auth/login`
-- `GET /api/events?userId=...`
-- `GET /api/dashboard/summary?userId=...`
-- `GET /api/dashboard/mood-trends?userId=...&days=7`
-- `GET /api/alerts?userId=...&size=10`
-- `GET /api/conversations?userId=...&size=100`
-- `GET /api/preferences/{userId}`
-- `PUT /api/preferences/{userId}`
-- `POST /api/ai/parent-advice`
-
-The API reads from the MySQL `events` table and transforms raw rows into frontend-friendly structures.
-
-### 4. The frontend displays parent-safe data
-
-The React frontend in `frontend/` calls the API and renders:
-
-- dashboard summary cards
-- mood trend charts
+- summary cards
+- mood trends
 - flagged alerts
-- conversation timeline
+- timeline groups
 - parent advice
+- user preferences
 
-Privacy behavior in the timeline:
+This keeps MySQL credentials off the frontend and centralizes privacy decisions in the backend.
 
-- non-flagged conversations are shown as summaries or overviews
-- flagged conversations show the raw child message and Teddy reply for review
+### 5. Frontend displays the result
 
-The frontend polls in the background so new conversations appear automatically without full-page flicker.
+The parent dashboard polls the backend on a short interval.
 
-## MySQL Schema
+Current behavior:
+
+- non-flagged items show topic and child emotion in a privacy-aware card
+- flagged items show the raw child message and the TedTalks reply
+- alerts surface flagged conversations
+- dashboard cards summarize recent activity and mood
+
+## Database Notes
 
 The core table is `events`.
 
-Important raw conversation fields:
+Important raw fields:
 
 - `id`
 - `user_id`
@@ -145,7 +136,7 @@ Important raw conversation fields:
 - `event_type`
 - `analysis_status`
 
-Important analysis fields added/used by the worker:
+Important enriched fields:
 
 - `processing_at`
 - `analyzed_at`
@@ -163,53 +154,57 @@ Important analysis fields added/used by the worker:
 - `flag_reasons_json`
 - `flagged_at`
 
-In practice:
+## Environment Files
 
-- Raspberry Pi inserts raw rows
-- worker enriches the same rows
-- API reads the enriched rows
-- frontend shows the transformed results
+TedTalks now uses three env locations:
 
-## Environment Variables
+Root `.env`
 
-Root `.env` currently contains backend-side database settings such as:
+- shared database settings used across the project
+- defaults like `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DB`, `DEVICE_ID`, and `USER_ID`
 
-```env
-MYSQL_HOST=172.20.xx.x
-MYSQL_PORT=3306
-MYSQL_USER=pi_user
-MYSQL_PASSWORD=password123
-MYSQL_DB=teddy_db
-DEVICE_ID=pi-1
-USER_ID=child-1
-```
+`backend/.env`
 
-The backend API server also supports:
+- backend-specific overrides
+- SMTP configuration for flagged email alerts
+
+Example backend SMTP settings:
 
 ```env
-API_HOST=0.0.0.0
-API_PORT=8000
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your_sender_email@gmail.com
+SMTP_PASSWORD=your_app_password
+SMTP_FROM=your_sender_email@gmail.com
 ```
 
-The analysis worker optionally uses:
+`frontend/.env`
 
-```env
-GEMINI_API_KEY=...
-GEMINI_MODEL=gemini-1.5-flash
-BATCH_LIMIT=200
-SLEEP_ON_IDLE_SEC=0.2
-```
-
-The frontend uses `frontend/.env`:
+- Vite frontend settings
 
 ```env
 VITE_API_BASE_URL=http://localhost:8000/api
 VITE_AI_BASE_URL=http://localhost:8000
 ```
 
-## How To Run The Project
+## API Endpoints
 
-### Backend API
+Current API routes:
+
+- `GET /api/health`
+- `POST /api/auth/login`
+- `GET /api/events?userId=...`
+- `GET /api/dashboard/summary?userId=...`
+- `GET /api/dashboard/mood-trends?userId=...&days=7`
+- `GET /api/alerts?userId=...&size=10`
+- `GET /api/conversations?userId=...&size=100`
+- `GET /api/preferences/{userId}`
+- `PUT /api/preferences/{userId}`
+- `POST /api/ai/parent-advice`
+
+## How To Run
+
+### Backend API and worker
 
 From the repo root:
 
@@ -218,89 +213,62 @@ cd C:\Users\owake\Desktop\TedTalks
 python backend\api_server.py
 ```
 
-This starts the local API on `http://localhost:8000`.
-
-### Analysis worker
-
-In another terminal:
-
-```powershell
-cd C:\Users\owake\Desktop\TedTalks
-python backend\analytics\worker.py
-```
-
-This continuously analyzes new `PENDING` rows in MySQL.
+The API now launches `backend/analytics/worker.py` automatically, so this is the main backend command to keep running.
 
 ### Frontend
 
-In a third terminal:
-
 ```powershell
 cd C:\Users\owake\Desktop\TedTalks\frontend
-npm install
-npm run dev
+cmd /c npm run dev
 ```
 
-Then open the Vite URL, usually:
+Open the local Vite URL, usually:
 
 ```text
 http://localhost:5173
 ```
 
-For demos, log in using:
-
-```text
-child-1
-```
-
 ### Raspberry Pi runtime
 
-Run the Pi-side app from the Pi environment:
+Run this on the Pi:
 
 ```bash
 python3 backend-raspi/chatbot.py
 ```
 
-That process will:
+## Alert Email Behavior
 
-- listen for a child utterance
-- generate a Teddy reply
-- save the turn into MySQL
+Flagged email alerts are generated by the worker after a row is marked flagged.
 
-If the worker is running, the row will soon be analyzed and then appear in the parent dashboard.
+Current demo behavior:
 
-## Demo Sequence
+- recipient is hardcoded in `backend/analytics/worker.py`
+- sender account comes from `backend/.env`
+- if SMTP settings are missing or invalid, the worker logs an email failure but still completes row analysis
 
-Recommended demo order:
+## Current Limitations
 
-1. Start `backend/api_server.py`
-2. Start `backend/analytics/worker.py`
-3. Start `frontend` with `npm run dev`
-4. Log in with `child-1`
-5. Trigger a new Pi conversation
-6. Show the dashboard updating from MySQL-backed data
+- Parent auth is still a lightweight development flow
+- Frontend updates use polling instead of websockets or server-sent events
+- Alert email recipient is still hardcoded for demo use and should be externalized
+- Backend email delivery depends on a valid SMTP sender account and app password
+- The API server is a local/demo server, not production-hardened infrastructure
+- The system still stores raw child and Teddy text in MySQL
+- Some frontend duplicate requests still appear during development polling
+- Fallback analysis is heuristic-based when Gemini is unavailable
 
-## Privacy Notes
+## Planned Improvements
 
-The current privacy model is:
-
-- raw child and Teddy text is stored in MySQL
-- the parent UI avoids showing raw text for normal conversations
-- raw text is shown for flagged alerts only
-
-This is more private than always rendering verbatim conversation text in the timeline, but the API still has access to raw text because it needs that data for flagged review and alert generation.
-
-## Known Limitations
-
-- The local API server is intended for demo/local use, not production hardening
-- Parent login is currently a lightweight development flow, not a full auth system
-- Frontend updates use background polling, not websockets/SSE
-- Large frontend bundle warnings still exist in production build output
+- Replace polling with real-time updates
+- Move alert recipients into user-managed settings
+- Add stronger auth and parent account controls
+- Improve summarization and safety classification quality
+- Add production-grade deployment and logging
+- Add explicit delivery tracking for alert emails
+- Reduce end-to-end latency between conversation close and dashboard update
 
 ## Summary
 
-The current implemented architecture is:
+The implemented pipeline is:
 
-Raspberry Pi voice app -> MySQL `events` table -> analysis worker -> local API server -> React parent dashboard
-
-That is the flow reflected by the code in this repository today.
+Raspberry Pi voice runtime -> MySQL `events` table -> backend worker -> API server -> React parent dashboard -> flagged email alerts
