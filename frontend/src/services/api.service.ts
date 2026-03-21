@@ -13,6 +13,7 @@ import type {
 } from '../types';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api').replace(/\/$/, '');
+const DISPLAY_TIME_ZONE = 'America/Toronto';
 const AUTH_TOKEN_KEY = 'authToken';
 const USER_ID_KEY = 'tedtalksUserId';
 const PREFS_PREFIX = 'tedtalksPreferences:';
@@ -48,6 +49,20 @@ interface FetchResult {
 
 class ApiService {
   private token: string | null = null;
+  private timeFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: DISPLAY_TIME_ZONE,
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  private monthDayFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: DISPLAY_TIME_ZONE,
+    month: 'short',
+    day: 'numeric',
+  });
+  private weekdayFormatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: DISPLAY_TIME_ZONE,
+    weekday: 'short',
+  });
 
   setToken(token: string) {
     this.token = token;
@@ -280,17 +295,14 @@ class ApiService {
   }
 
   private toConversationItem(event: BackendEventRecord): ConversationItem {
-    const timestamp = new Date(event.timestamp);
     return {
       id: event.id,
       timestamp: event.timestamp,
-      timeFormatted: timestamp.toLocaleTimeString([], {
-        hour: 'numeric',
-        minute: '2-digit',
-      }),
+      timeFormatted: this.formatTimeInDisplayZone(event.timestamp),
       type: event.eventType,
       content: event.childText || event.summaryText || 'No transcript available',
       mood: event.moodEmoji || this.formatEmotion(event.emotionLabel) || '🙂',
+      childEmotion: this.formatEmotion(event.emotionLabel),
       flagged: event.flagged,
       topic: event.topicLabel,
       keywords: event.keywords,
@@ -309,29 +321,55 @@ class ApiService {
     return value.charAt(0).toUpperCase() + value.slice(1);
   }
 
-  private formatDateLabel(dateValue: string): string {
+  private getDisplayDateParts(dateValue: string) {
     const date = new Date(dateValue);
-    const today = new Date();
-    const yesterday = new Date();
-    yesterday.setDate(today.getDate() - 1);
+    return {
+      year: Number(
+        new Intl.DateTimeFormat('en-CA', {
+          timeZone: DISPLAY_TIME_ZONE,
+          year: 'numeric',
+        }).format(date)
+      ),
+      month: Number(
+        new Intl.DateTimeFormat('en-CA', {
+          timeZone: DISPLAY_TIME_ZONE,
+          month: 'numeric',
+        }).format(date)
+      ),
+      day: Number(
+        new Intl.DateTimeFormat('en-CA', {
+          timeZone: DISPLAY_TIME_ZONE,
+          day: 'numeric',
+        }).format(date)
+      ),
+    };
+  }
 
-    const sameDay = (left: Date, right: Date) =>
-      left.getFullYear() === right.getFullYear() &&
-      left.getMonth() === right.getMonth() &&
-      left.getDate() === right.getDate();
+  private formatTimeInDisplayZone(dateValue: string): string {
+    return this.timeFormatter.format(new Date(dateValue));
+  }
 
-    if (sameDay(date, today)) {
+  private formatDateLabel(dateValue: string): string {
+    const target = this.getDisplayDateParts(dateValue);
+    const today = this.getDisplayDateParts(new Date().toISOString());
+    const yesterdayDate = new Date();
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    const yesterday = this.getDisplayDateParts(yesterdayDate.toISOString());
+
+    const sameDay = (
+      left: { year: number; month: number; day: number },
+      right: { year: number; month: number; day: number }
+    ) => left.year === right.year && left.month === right.month && left.day === right.day;
+
+    if (sameDay(target, today)) {
       return 'Today';
     }
 
-    if (sameDay(date, yesterday)) {
+    if (sameDay(target, yesterday)) {
       return 'Yesterday';
     }
 
-    return date.toLocaleDateString([], {
-      month: 'short',
-      day: 'numeric',
-    });
+    return this.monthDayFormatter.format(new Date(dateValue));
   }
 
   private relativeTime(timestamp: string): string {
@@ -390,7 +428,7 @@ class ApiService {
     }
 
     return Array.from(buckets.entries()).map(([date, scores]) => {
-      const day = new Date(date).toLocaleDateString([], { weekday: 'short' });
+      const day = this.weekdayFormatter.format(new Date(`${date}T00:00:00Z`));
       const mood =
         scores.length > 0
           ? Number((scores.reduce((sum, score) => sum + score, 0) / scores.length).toFixed(1))
@@ -441,6 +479,22 @@ class ApiService {
       const record = item as JsonRecord;
       return typeof record.date === 'string' && Array.isArray(record.items);
     });
+  }
+
+  private normalizeConversationDays(days: ConversationDay[]): ConversationDay[] {
+    return days.map((day) => ({
+      ...day,
+      date:
+        day.items.length > 0 && day.items[0]?.timestamp
+          ? this.formatDateLabel(day.items[0].timestamp)
+          : day.date,
+      items: day.items.map((item) => ({
+        ...item,
+        timeFormatted: item.timestamp
+          ? this.formatTimeInDisplayZone(item.timestamp)
+          : item.timeFormatted,
+      })),
+    }));
   }
 
   private getStoredPreferences(userId: string): AIPreferences {
@@ -578,7 +632,7 @@ class ApiService {
     if (this.looksLikeConversationDays(dedicated)) {
       return {
         success: true,
-        data: dedicated,
+        data: this.normalizeConversationDays(dedicated),
         timestamp: new Date().toISOString(),
       };
     }

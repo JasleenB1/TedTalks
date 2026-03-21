@@ -252,6 +252,9 @@ def get_connection():
             database=MYSQL_DB,
             autocommit=False
         )
+        cursor = conn.cursor()
+        cursor.execute("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED")
+        cursor.close()
         return conn
     except Error as e:
         raise SystemExit(f"ERROR: Could not connect to MySQL: {e}")
@@ -509,6 +512,8 @@ def process_pending_batch(conn, limit: int) -> int:
     """, (limit,))
     pending = cursor.fetchall()
     cursor.close()
+    # End the read transaction so the next poll sees newly inserted rows.
+    conn.rollback()
 
     processed = 0
     for item in pending:
@@ -538,6 +543,9 @@ def process_new_pending_once(conn) -> int:
     """, (BATCH_LIMIT,))
     rows = cursor.fetchall()
     cursor.close()
+    # Without closing the read transaction, MySQL can keep returning the same
+    # snapshot and miss rows inserted after the worker started.
+    conn.rollback()
 
     processed = 0
     for item in rows:

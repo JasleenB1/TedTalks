@@ -8,6 +8,12 @@ interface DashboardScreenProps {
   userId: string;
 }
 
+const displayTimeFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Toronto',
+  hour: 'numeric',
+  minute: '2-digit',
+});
+
 export function DashboardScreen({ userId }: DashboardScreenProps) {
   const { data: summary, loading: summaryLoading, error: summaryError } = useApi(
     () => apiService.getDashboardSummary(userId),
@@ -88,10 +94,7 @@ export function DashboardScreen({ userId }: DashboardScreenProps) {
             <span className="text-ink/70">Last active</span>
             <span className="text-ink">
               {summary?.lastActiveTimestamp
-                ? new Date(summary.lastActiveTimestamp).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })
+                ? displayTimeFormatter.format(new Date(summary.lastActiveTimestamp))
                 : 'N/A'}
             </span>
           </div>

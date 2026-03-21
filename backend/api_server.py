@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
 
 import mysql.connector
 from dotenv import load_dotenv
@@ -23,6 +26,9 @@ API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
 DEFAULT_USER_ID = os.getenv("USER_ID", "child-1")
 PREFERENCES_PATH = Path(__file__).with_name("preferences.json")
+DISPLAY_TIMEZONE = ZoneInfo(os.getenv("DISPLAY_TIMEZONE", "America/Toronto"))
+RUN_EMBEDDED_WORKER = os.getenv("RUN_EMBEDDED_WORKER", "1") != "0"
+WORKER_PROCESS: Optional[subprocess.Popen] = None
 
 EMOTION_SCORES = {
     "happy": 5.0,
@@ -56,6 +62,29 @@ def get_connection():
     )
 
 
+def has_pending_events(user_id: Optional[str] = None) -> bool:
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        params: List[Any] = []
+        query = """
+            SELECT 1
+            FROM events
+            WHERE event_type = 'CHAT'
+              AND analysis_status = 'PENDING'
+        """
+        if user_id:
+            query += " AND user_id = %s"
+            params.append(user_id)
+        query += " LIMIT 1"
+        cursor.execute(query, tuple(params))
+        found = cursor.fetchone() is not None
+        cursor.close()
+        return found
+    finally:
+        conn.close()
+
+
 def parse_json_field(value: Any) -> List[str]:
     if value is None:
         return []
@@ -80,6 +109,14 @@ def isoformat_utc(value: Any) -> str:
         dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc).isoformat()
     return str(value)
+
+
+def parse_timestamp(timestamp: str) -> datetime:
+    return datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+
+
+def to_display_time(timestamp: str) -> datetime:
+    return parse_timestamp(timestamp).astimezone(DISPLAY_TIMEZONE)
 
 
 def row_to_event(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -129,20 +166,26 @@ def set_user_preferences(user_id: str, preferences: Dict[str, Any]) -> Dict[str,
     return data[user_id]
 
 
-def fetch_events(user_id: str, size: int = 100) -> List[Dict[str, Any]]:
+def fetch_events(user_id: str, size: int = 100, status: Optional[str] = "DONE") -> List[Dict[str, Any]]:
     conn = get_connection()
     try:
         cursor = conn.cursor(dictionary=True)
-        cursor.execute(
-            """
+        params: List[Any] = [user_id]
+        query = """
             SELECT *
             FROM events
             WHERE user_id = %s
+              AND event_type = 'CHAT'
+        """
+        if status:
+            query += " AND analysis_status = %s"
+            params.append(status)
+        query += """
             ORDER BY timestamp_utc DESC
             LIMIT %s
-            """,
-            (user_id, size),
-        )
+        """
+        params.append(size)
+        cursor.execute(query, tuple(params))
         rows = cursor.fetchall()
         cursor.close()
         return [row_to_event(row) for row in rows]
@@ -224,9 +267,9 @@ def build_alerts(events: List[Dict[str, Any]], size: int) -> List[Dict[str, Any]
 
 
 def format_date_label(timestamp: str) -> str:
-    dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    dt = to_display_time(timestamp)
     local_date = dt.date()
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(DISPLAY_TIMEZONE).date()
     yesterday = today - timedelta(days=1)
     if local_date == today:
         return "Today"
@@ -243,12 +286,11 @@ def build_conversations(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             {
                 "id": event["id"],
                 "timestamp": event["timestamp"],
-                "timeFormatted": datetime.fromisoformat(
-                    event["timestamp"].replace("Z", "+00:00")
-                ).strftime("%I:%M %p").lstrip("0"),
+                "timeFormatted": to_display_time(event["timestamp"]).strftime("%I:%M %p").lstrip("0"),
                 "type": event["eventType"],
                 "content": event["childText"] or event.get("summaryText") or "",
                 "mood": event.get("moodEmoji") or event.get("emotionLabel") or "🙂",
+                "childEmotion": event.get("emotionLabel"),
                 "flagged": bool(event.get("flagged")),
                 "topic": event.get("topicLabel"),
                 "keywords": event.get("keywords", []),
@@ -260,6 +302,38 @@ def build_conversations(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             }
         )
     return [{"date": date, "items": items} for date, items in grouped.items()]
+
+
+def start_embedded_worker() -> None:
+    global WORKER_PROCESS
+    if not RUN_EMBEDDED_WORKER:
+        print("[api] embedded worker disabled")
+        return
+
+    worker_path = Path(__file__).resolve().parent / "analytics" / "worker.py"
+    try:
+        WORKER_PROCESS = subprocess.Popen(
+            [sys.executable, str(worker_path)],
+            cwd=str(worker_path.parent),
+        )
+        print(f"[api] worker.py launched automatically (pid={WORKER_PROCESS.pid})")
+    except Exception as exc:
+        print(f"[api] failed to launch worker.py automatically: {exc}")
+
+
+def ensure_worker_running_for_pending(user_id: Optional[str] = None) -> None:
+    global WORKER_PROCESS
+    if not RUN_EMBEDDED_WORKER:
+        return
+
+    if not has_pending_events(user_id):
+        return
+
+    if WORKER_PROCESS is not None and WORKER_PROCESS.poll() is None:
+        return
+
+    print("[api] pending rows detected; relaunching worker.py")
+    start_embedded_worker()
 
 
 class ApiHandler(BaseHTTPRequestHandler):
@@ -293,38 +367,42 @@ class ApiHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
 
         try:
+            requested_user_id = query.get("userId", query.get("user_id", [DEFAULT_USER_ID]))[0]
+            if path.startswith("/api/"):
+                ensure_worker_running_for_pending(requested_user_id)
+
             if path == "/api/health":
                 self._send_json({"ok": True, "timestamp": datetime.now(timezone.utc).isoformat()})
                 return
 
             if path == "/api/events":
-                user_id = query.get("userId", query.get("user_id", [DEFAULT_USER_ID]))[0]
+                user_id = requested_user_id
                 size = int(query.get("size", ["100"])[0])
                 self._send_json(fetch_events(user_id, size))
                 return
 
             if path == "/api/dashboard/summary":
-                user_id = query.get("userId", query.get("user_id", [DEFAULT_USER_ID]))[0]
+                user_id = requested_user_id
                 events = fetch_events(user_id, 100)
                 self._send_json(build_summary(events))
                 return
 
             if path == "/api/dashboard/mood-trends":
-                user_id = query.get("userId", query.get("user_id", [DEFAULT_USER_ID]))[0]
+                user_id = requested_user_id
                 days = int(query.get("days", ["7"])[0])
                 events = fetch_events(user_id, 500)
                 self._send_json(build_mood_trends(events, days))
                 return
 
             if path == "/api/alerts":
-                user_id = query.get("userId", query.get("user_id", [DEFAULT_USER_ID]))[0]
+                user_id = requested_user_id
                 size = int(query.get("size", ["10"])[0])
                 events = fetch_events(user_id, 200)
                 self._send_json(build_alerts(events, size))
                 return
 
             if path == "/api/conversations":
-                user_id = query.get("userId", query.get("user_id", [DEFAULT_USER_ID]))[0]
+                user_id = requested_user_id
                 size = int(query.get("size", ["100"])[0])
                 events = fetch_events(user_id, size)
                 self._send_json(build_conversations(events))
@@ -395,6 +473,7 @@ class ApiHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    start_embedded_worker()
     server = ThreadingHTTPServer((API_HOST, API_PORT), ApiHandler)
     print(f"[api] serving on http://{API_HOST}:{API_PORT}")
     print(f"[api] mysql={MYSQL_HOST}:{MYSQL_PORT} db={MYSQL_DB}")

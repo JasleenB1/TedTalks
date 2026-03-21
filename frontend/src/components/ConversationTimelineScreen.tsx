@@ -8,34 +8,15 @@ interface ConversationTimelineScreenProps {
   userId: string;
 }
 
-function buildSafeSummary(item: ConversationItem): string {
-  if (item.summary?.trim()) {
-    const summary = item.summary.trim();
-    const lowerSummary = summary.toLowerCase();
-
-    if (
-      !lowerSummary.includes(item.content.trim().toLowerCase()) &&
-      summary !== item.content.trim()
-    ) {
-      return summary;
-    }
+function formatConversationLabel(value: string | null | undefined, fallback: string): string {
+  if (!value?.trim()) {
+    return fallback;
   }
 
-  const typeLabel = item.type ? item.type.toLowerCase() : 'conversation';
-  const moodLabel = item.mood ? `Mood was ${item.mood}.` : '';
-  const topicLabel = item.topic ? `Child asked about ${item.topic}.` : `Child had a ${typeLabel}.`;
-  const keywordLabel =
-    item.keywords && item.keywords.length > 0
-      ? `Main themes: ${item.keywords.slice(0, 3).join(', ')}.`
-      : '';
-
-  const synthesized = [topicLabel, moodLabel, keywordLabel].filter(Boolean).join(' ');
-
-  if (synthesized) {
-    return synthesized;
-  }
-
-  return 'Child had a conversation. Summary details are limited for privacy.';
+  return value
+    .trim()
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 export function ConversationTimelineScreen({ userId }: ConversationTimelineScreenProps) {
@@ -172,8 +153,24 @@ export function ConversationTimelineScreen({ userId }: ConversationTimelineScree
                           </>
                         ) : (
                           <div className="rounded-xl border border-cloud bg-white/70 p-3">
-                            <div className="text-xs text-ink/60 mb-1">Conversation summary</div>
-                            <p className="text-sm text-ink">{buildSafeSummary(item)}</p>
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <div className="rounded-lg bg-offwhite px-3 py-2">
+                                <div className="text-[11px] uppercase tracking-[0.16em] text-ink/45">
+                                  Topic
+                                </div>
+                                <p className="mt-1 text-sm font-medium text-ink">
+                                  {formatConversationLabel(item.topic, 'General conversation')}
+                                </p>
+                              </div>
+                              <div className="rounded-lg bg-offwhite px-3 py-2">
+                                <div className="text-[11px] uppercase tracking-[0.16em] text-ink/45">
+                                  Child emotion
+                                </div>
+                                <p className="mt-1 text-sm font-medium text-ink">
+                                  {formatConversationLabel(item.childEmotion ?? item.mood, 'Unknown')}
+                                </p>
+                              </div>
+                            </div>
                           </div>
                         )}
 

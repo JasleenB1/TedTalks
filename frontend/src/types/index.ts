@@ -58,6 +58,7 @@ export interface ConversationItem {
   type: string;
   content: string;
   mood: string;
+  childEmotion?: string | null;
   flagged: boolean;
   topic?: string | null;
   keywords?: string[];
