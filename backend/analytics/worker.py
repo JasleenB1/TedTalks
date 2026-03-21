@@ -3,14 +3,20 @@ import os
 import re
 import json
 import time
+import smtplib
 from datetime import datetime, timezone
+from email.message import EmailMessage
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 import mysql.connector
 from mysql.connector import Error
 
-load_dotenv()  # loads backend/.env when you run from backend/
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = BACKEND_DIR.parent
+load_dotenv(ROOT_DIR / ".env")
+load_dotenv(BACKEND_DIR / ".env", override=True)
 
 
 # -----------------------------
@@ -28,6 +34,12 @@ USE_GEMINI = bool(GEMINI_API_KEY)
 
 BATCH_LIMIT = int(os.getenv("BATCH_LIMIT", "200"))  # how many pending rows to process on startup
 SLEEP_ON_IDLE_SEC = float(os.getenv("SLEEP_ON_IDLE_SEC", "0.2"))
+ALERT_EMAIL_TO = "hola66567@gmail.com"
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER)
 
 ALLOWED_EMOTIONS = ["happy", "excited", "calm", "neutral", "sad", "anxious", "angry", "frustrated", "tired"]
 ALLOWED_TOPICS = ["school", "friends", "family", "sleep", "health", "games", "story", "general"]
@@ -163,6 +175,46 @@ def safe_summary(child_text: str) -> str:
     if len(s) > 160:
         s = s[:160].rstrip() + "…"
     return s
+
+
+def send_flag_alert_email(row: Dict[str, Any], update_fields: Dict[str, Any]) -> None:
+    if not SMTP_USER or not SMTP_PASSWORD or not SMTP_FROM:
+        print("[worker] email alert skipped: SMTP settings are not configured")
+        return
+
+    timestamp = row.get("timestamp_utc")
+    if isinstance(timestamp, datetime):
+        timestamp_label = timestamp.replace(tzinfo=timezone.utc).isoformat()
+    else:
+        timestamp_label = str(timestamp or now_iso())
+
+    message = EmailMessage()
+    message["Subject"] = f"TedTalks Alert: flagged conversation for {row.get('user_id') or 'child'}"
+    message["From"] = SMTP_FROM
+    message["To"] = ALERT_EMAIL_TO
+    message.set_content(
+        "\n".join(
+            [
+                "A flagged conversation was detected.",
+                f"Child: {row.get('user_id') or 'unknown'}",
+                f"Event ID: {row.get('id')}",
+                f"Time (UTC): {timestamp_label}",
+                f"Topic: {update_fields.get('topicLabel') or 'general'}",
+                "Summary: "
+                + (update_fields.get("summary") or safe_summary(row.get("child_text", "") or "")),
+                "Reasons: "
+                + (", ".join(update_fields.get("flagReasons") or []) or "flagged content detected"),
+                "Please review the TedTalks dashboard.",
+            ]
+        )
+    )
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as server:
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASSWORD)
+        server.send_message(message)
+
+    print(f"[worker] email alert sent for id={row.get('id')} -> {ALERT_EMAIL_TO}")
 
 
 # -----------------------------
@@ -474,6 +526,12 @@ def analyze_and_update(conn, row: Dict[str, Any]) -> None:
     ))
     conn.commit()
     cursor.close()
+
+    if bool(update_fields["flagged"]) and not row.get("flagged_at"):
+        try:
+            send_flag_alert_email(row, update_fields)
+        except Exception as exc:
+            print(f"[worker] email alert failed for id={row['id']}: {exc}")
 
     print(
         f"[worker] DONE id={row['id']} "

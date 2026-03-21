@@ -15,7 +15,10 @@ import mysql.connector
 from dotenv import load_dotenv
 from mysql.connector import Error
 
-load_dotenv()
+BACKEND_DIR = Path(__file__).resolve().parent
+ROOT_DIR = BACKEND_DIR.parent
+load_dotenv(ROOT_DIR / ".env")
+load_dotenv(BACKEND_DIR / ".env", override=True)
 
 MYSQL_HOST = os.getenv("MYSQL_HOST", "127.0.0.1")
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
